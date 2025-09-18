@@ -2,7 +2,7 @@
 """
 Automower → console + (optional) InfluxDB v2 logger (REST-based)
 - Loads .env (python-dotenv)
-- Refreshes OAuth access token (and persists rotated refresh tokens to .env)
+- Refreshes OAuth access token and persists rotated refresh tokens to .env
 - Calls Automower Connect REST /v1/mowers via aiohttp
 - Prints a readable line each poll; --debug and custom --trace
 
@@ -218,12 +218,11 @@ def _summary_line(name: str, attrs: Dict[str, Any]) -> str:
     return " | ".join(parts)
 
 # -------- Main polling --------
-async def run_once(cfg: Config, influx: InfluxWriter) -> int:
+async def run_once(cfg: Config, influx: InfluxWriter, auth: StaticAuth) -> int:
     if not all([cfg.client_id, cfg.client_secret, cfg.api_key, cfg.refresh_token]):
         log.error("Missing required env vars (HUSQ_CLIENT_ID/SECRET/APP_KEY/REFRESH_TOKEN).")
         return 2
 
-    auth = StaticAuth(cfg.client_id, cfg.client_secret, cfg.api_key, cfg.refresh_token)
     payload = await fetch_mowers(auth, cfg.api_key)
     data = payload.get("data") or []
 
@@ -241,7 +240,7 @@ async def run_once(cfg: Config, influx: InfluxWriter) -> int:
         mower = attrs.get("mower") or {}
         pos = (attrs.get("positions") or [{}])[-1] if attrs.get("positions") else {}
         cutting = attrs.get("cutting") or {}
-        conn = (attrs.get("metadata") or {}).get("connected")  # REST shows connection under metadata
+        conn = (attrs.get("metadata") or {}).get("connected")
 
         activity = mower.get("activity")
         state = mower.get("state")
@@ -270,10 +269,10 @@ async def run_once(cfg: Config, influx: InfluxWriter) -> int:
 
     return 0
 
-async def run_loop(cfg: Config, influx: InfluxWriter) -> int:
+async def run_loop(cfg: Config, influx: InfluxWriter, auth: StaticAuth) -> int:
     while True:
         try:
-            await run_once(cfg, influx)
+            await run_once(cfg, influx, auth)
         except Exception as e:
             log.exception("Polling error: %s", e)
         await asyncio.sleep(max(1, cfg.poll_seconds))
@@ -296,12 +295,16 @@ def main(argv: list[str]) -> int:
     if args.poll_seconds is not None:
         cfg.poll_seconds = args.poll_seconds
     influx = InfluxWriter(cfg)
+
+    # Create a single auth object and reuse it (keeps rotated refresh token in memory)
+    auth = StaticAuth(cfg.client_id, cfg.client_secret, cfg.api_key, cfg.refresh_token)
+
     log.debug("Config: %r", cfg)
     try:
         if args.once:
-            return asyncio.run(run_once(cfg, influx))
+            return asyncio.run(run_once(cfg, influx, auth))
         else:
-            return asyncio.run(run_loop(cfg, influx))
+            return asyncio.run(run_loop(cfg, influx, auth))
     except KeyboardInterrupt:
         log.info("Interrupted by user.")
         return 130
