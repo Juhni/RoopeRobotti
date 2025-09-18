@@ -1,0 +1,12 @@
+# See what your mower supports (and its work areas + current state)
+python automower_ctl.py list-actions
+
+# Examples
+python automower_ctl.py pause
+python automower_ctl.py resume --fallback-start
+python automower_ctl.py start --work-area Takapiha --duration 60
+python automower_ctl.py park --duration 30
+python automower_ctl.py park --until-next
+python automower_ctl.py confirm-error
+python automower_ctl.py set-height 57
+python automower_ctl.py set-headlight ALWAYS_OFF   # if your model supports headlights
